@@ -7,5 +7,5 @@
 
 typedef unsigned char byte;
 typedef unsigned int bits; //the type of the bits chunk
-
+typedef unsigned short uint16;
 #endif //ITCT_MPEG1_TYPEDEFINITION_H

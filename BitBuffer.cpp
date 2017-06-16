@@ -99,7 +99,7 @@ buf_size_t BitBuffer::byteIdx() {
     return this->bitIdx >> 3;
 }
 
-byte BitBuffer::readOneBit() {
+byte BitBuffer::consumeOneBit() {
     byte currentByte = this->buffer[this->byteIdx()];
     byte bitIdxInByte = this->bitIdxInCurrentByte();
     byte bit =  currentByte >> (7 - bitIdxInByte) & (byte)0x01;
@@ -109,4 +109,8 @@ byte BitBuffer::readOneBit() {
 
 byte BitBuffer::bitIdxInCurrentByte() {
     return (byte)(this->byteIdx() & 7);
+}
+
+bool BitBuffer::nextStartCodeLastByteCompare(byte lastByte) {
+    return this->nextStartCodeLastByte() == lastByte;
 }

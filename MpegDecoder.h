@@ -7,6 +7,8 @@
 
 
 #include "BitBuffer.h"
+#include "Sequence.h"
+#include "HuffmanTable.h"
 
 class MpegDecoder {
 public:
@@ -16,8 +18,7 @@ public:
 
 private:
     BitBuffer* bitBuffer;
-    int displayWidth;
-    int displayHeight;
+    Sequence* sequence;
     float fps;
     byte* intraQuantMat;
     byte* nonIntraQuantMat;
@@ -32,8 +33,13 @@ private:
         static const byte EXTENSION = 0xb5;
         static const byte SEQ_END = 0xb7;
         static const byte GROUP = 0xb8;
+        static const byte SLICE_FIRST = 0x01;
+        static const byte SLICE_LAST = 0xaf;
         static bits fullStartCode(byte lastByte) {
             return (bits) (0x0100 | lastByte);
+        }
+        static bool isSliceLastByte(byte lastByte) {
+            return lastByte >= SLICE_FIRST && lastByte <= SLICE_LAST;
         }
     };
 
@@ -44,9 +50,19 @@ private:
 
     void decodeGroupOfPictures();
 
+    void consumePicForwardBackwardCode(byte& fullPelVec, byte& f);
+
     void consumeExtAndUserData();
 
     void loadQuantMat(byte *quantMat);
+
+    void decodePicture();
+
+    void decodeSlice();
+
+    void decodeMacroblock();
+
+    void sliceBeginReset();
 };
 
 

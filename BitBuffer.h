@@ -14,8 +14,9 @@ class BitBuffer {
 public:
     BitBuffer(char* fileName);
     ~BitBuffer();
-    byte readOneBit();
+    byte consumeOneBit();
     byte nextStartCodeLastByte();
+    bool nextStartCodeLastByteCompare(byte lastByte);
     bits peek(byte count);
     bits consume(byte count);
     void skip(byte count);
