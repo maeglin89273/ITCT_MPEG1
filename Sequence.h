@@ -11,11 +11,22 @@
 
 class Sequence {
 public:
+    class MotionVector {
+    public:
+        int hComp;
+        int vComp;
+        void resetToZero() {
+            this->hComp = 0;
+            this->vComp = 0;
+        }
+    };
     class PictureTemporaryInfo {
     public:
         byte forwradF;
+        byte forwardRSize;
         byte fullPelForwardVec;
         byte backwardF;
+        byte backwardRSize;
         byte fullPelBackwardVec;
 
     };
@@ -36,6 +47,25 @@ public:
         int pastIntraAddress;
         byte quantScale;
         byte type;
+        byte quant;
+        byte motionForward;
+        byte motionBackward;
+        byte pattern;
+        byte intra;
+        MotionVector reconForVec;
+        MotionVector preReconForVec;
+        MotionVector reconBackVec;
+        MotionVector preReconBackVec;
+        Sequence* seqRef;
+        MacroblockTemporaryInfo(Sequence* seqRef) {
+            this->seqRef = seqRef;
+        }
+        int mbRow() {
+            return this->address / seqRef->getMBWidth();
+        }
+        int mbCol() {
+            return this->address % seqRef->getMBWidth();
+        }
     };
 
     class BlockTemporaryInfo {
@@ -43,6 +73,12 @@ public:
         int dcYPast;
         int dcCbPast;
         int dcCrPast;
+
+        void resetDcPast() {
+            this->dcYPast = 1024;
+            this->dcCbPast = 1024;
+            this->dcCrPast = 1024;
+        }
 
     };
 

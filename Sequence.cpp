@@ -4,7 +4,7 @@
 
 #include "Sequence.h"
 
-Sequence::Sequence(int width, int height) {
+Sequence::Sequence(int width, int height): mbTempInfo(this) {
     this->width = width;
     this->height = height;
     this->mbWidth = (width + 15) >> 4; // ceil to the multiple of 16 pixels

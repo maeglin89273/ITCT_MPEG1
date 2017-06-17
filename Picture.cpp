@@ -76,7 +76,8 @@ void Picture::toBGRAndCrop(int height, int width) {
 
     delete [] this->data;
     this->data = bgrData;
-
+    this->width = width;
+    this->height = height;
     this->colorMode = ColorMode::BGR;
 
 }

@@ -18,7 +18,7 @@ public:
 
 private:
     BitBuffer* bitBuffer;
-    Sequence* sequence;
+    Sequence* seq;
     float fps;
     byte* intraQuantMat;
     byte* nonIntraQuantMat;
@@ -50,7 +50,7 @@ private:
 
     void decodeGroupOfPictures();
 
-    void consumePicForwardBackwardCode(byte& fullPelVec, byte& f);
+    void consumePicForwardBackwardCode(byte& fullPelVec, byte& rSize, byte& f);
 
     void consumeExtAndUserData();
 
@@ -60,9 +60,17 @@ private:
 
     void decodeSlice();
 
-    void decodeMacroblock();
+    void decodeMacroblock(bool b);
 
     void sliceBeginReset();
+
+    void decodeMacroblockType(byte type);
+
+    void decodeBlock(int i, byte mbIntra);
+
+    void skippedMacroblockReset();
+
+    void decodeReconMotionVec(byte f, byte rSize, byte fullPelVec, int &reconVecComp, int &prevReconVecComp);
 };
 
 
