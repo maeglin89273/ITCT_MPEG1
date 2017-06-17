@@ -3,6 +3,7 @@
 //
 
 #include "Block.h"
+#include "Picture.h"
 
 Block::Block(byte *bufPtr, int height, int width, int cIdx, int superBlockWidth, int upScaleY, int upScaleX) {
     this->ptr = bufPtr + cIdx;
@@ -67,6 +68,39 @@ void Block::setBufferPtr(byte *bufPtr) {
 void Block::setCIndex(int cIdx) {
     this->ptr = this->ptr - this->cIdx + cIdx;
     this->cIdx = cIdx;
+}
+
+void Block::add(int x, int y, int value) {
+    for (int ty = sY * y; ty < sY * y + sY; ty++) {
+        for (int tx = sX * x; tx < sX * x + sX; tx++) {
+            this->ptr[tx * 3 + ty * this->sbWidth] = Picture::clamp(this->ptr[tx * 3 + ty * this->sbWidth] + value);
+        }
+    }
+}
+
+void Block::add(int i, int value) {
+    int y = i / this->width;
+    int x = i % this->width;
+    this->add(x, y, value);
+}
+
+void Block::set(int *data) {
+    int i = 0;
+    for (int y = 0; y < this->height; y++) {
+        for (int x = 0; x < this->width; x++) {
+            this->set(x, y, Picture::clamp(data[i++]));
+        }
+    }
+}
+
+
+void Block::add(int *data) {
+    int i = 0;
+    for (int y = 0; y < this->height; y++) {
+        for (int x = 0; x < this->width; x++) {
+            this->add(x, y, data[i++]);
+        }
+    }
 }
 
 

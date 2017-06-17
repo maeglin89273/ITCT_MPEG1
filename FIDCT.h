@@ -1,9 +1,9 @@
 //
-// Created by maeglin89273 on 4/20/17.
-// reference from https://github.com/xcore/sc_jpeg/blob/master/module_jpeg_decoder/src/idct.c
+// Created by maeglin89273 on 6/17/17.
+//
 
-#ifndef ITCT_JPEG_IDCT_H
-#define ITCT_JPEG_IDCT_H
+#ifndef ITCT_MPEG1_FIDCT_H
+#define ITCT_MPEG1_FIDCT_H
 
 
 class FIDCT {
@@ -27,4 +27,4 @@ public:
 };
 
 
-#endif //ITCT_JPEG_IDCT_H
+#endif //ITCT_MPEG1_FIDCT_H

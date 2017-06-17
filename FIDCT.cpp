@@ -1,5 +1,5 @@
 //
-// Created by maeglin89273 on 4/20/17.
+// Created by maeglin89273 on 6/17/17.
 //
 
 #include "FIDCT.h"
@@ -17,7 +17,7 @@ void FIDCT::idctRow(int *block) {
 
 /* shortcut */
     if (!((x1 = block[4]<<11) | (x2 = block[6]) | (x3 = block[2]) |
-    (x4 = block[1]) | (x5 = block[7]) | (x6 = block[5]) | (x7 = block[3]))) {
+          (x4 = block[1]) | (x5 = block[7]) | (x6 = block[5]) | (x7 = block[3]))) {
         block[0]=block[1]=block[2]=block[3]=block[4]=block[5]=block[6]=block[7]=block[0]<<3;
         return;
     }
@@ -68,11 +68,11 @@ void FIDCT::idctCol(int * blk) {
 
     /* shortcut */
     if (!((x1 = (blk[8*4]<<8)) | (x2 = blk[8*6]) | (x3 = blk[8*2]) |
-    (x4 = blk[8*1]) | (x5 = blk[8*7]) | (x6 = blk[8*5]) | (x7 = blk[8*3])))
+          (x4 = blk[8*1]) | (x5 = blk[8*7]) | (x6 = blk[8*5]) | (x7 = blk[8*3])))
     {
-    blk[8*0]=blk[8*1]=blk[8*2]=blk[8*3]=blk[8*4]=blk[8*5]=blk[8*6]=blk[8*7]=
-    this->iclp[(blk[8*0]+32)>>6];
-    return;
+        blk[8*0]=blk[8*1]=blk[8*2]=blk[8*3]=blk[8*4]=blk[8*5]=blk[8*6]=blk[8*7]=
+                this->iclp[(blk[8*0]+32)>>6];
+        return;
     }
 
     x0 = (blk[8*0]<<8) + 8192;

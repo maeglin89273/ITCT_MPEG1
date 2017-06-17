@@ -24,6 +24,10 @@ public:
     ~Block();
     void set(int x, int y, byte value);
     void set(int i, byte value);
+    void set(int* data);
+    void add(int x, int y, int value);
+    void add(int i, int value);
+    void add(int* data);
     byte get(int x, int y);
     byte get(int i);
     int getWidth();

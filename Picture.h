@@ -24,6 +24,7 @@ public:
 
     Picture(int height, int width, byte type, uint16 tmpRef);
     Picture(const Picture& pic);
+    Picture& operator=(const Picture& pic);
     int getWidth();
     int getHeight();
     unsigned char* getData();
@@ -31,6 +32,7 @@ public:
     uint16 getTemporalReference();
     void toBGRAndCrop(int height, int width);
     static byte clamp(float value);
+    static byte clamp(int value);
     ~Picture();
 
 private:

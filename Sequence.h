@@ -15,6 +15,21 @@ public:
     public:
         int hComp;
         int vComp;
+        MotionVector() {
+            this->hComp = 0;
+            this->vComp = 0;
+        }
+
+        MotionVector(const MotionVector& vec) {
+            this->hComp = vec.hComp;
+            this->vComp = vec.vComp;
+        }
+        MotionVector& operator=(const MotionVector& vec) {
+            this->hComp = vec.hComp;
+            this->vComp = vec.vComp;
+            return *this;
+        }
+
         void resetToZero() {
             this->hComp = 0;
             this->vComp = 0;

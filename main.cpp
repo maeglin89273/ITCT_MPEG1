@@ -8,7 +8,11 @@ int main(int argc, char** argv) {
         return -1;
     }
 
-    MpegPlayer player(argv[1]);
-
+//    MpegPlayer player(argv[1]);
+    int a = 3;
+    int& b = a;
+    int& c = b;
+    c = -1;
+    std::cout << a << std::endl;
     return 0;
 }

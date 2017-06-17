@@ -27,6 +27,19 @@ Picture::Picture(const Picture &pic) {
     this->colorMode = pic.colorMode;
 }
 
+Picture &Picture::operator=(const Picture &pic) {
+    this->width = pic.width;
+    this->height = pic.height;
+    this->type = pic.type;
+    this->tmpRef = tmpRef;
+    unsigned int size = (unsigned int) (this->width * this->height * 3);
+    delete [] this->data;
+    this->data = new byte[size];
+    memcpy(this->data, pic.data, size);
+    this->colorMode = pic.colorMode;
+    return *this;
+}
+
 Picture::~Picture() {
     delete [] this->data;
 }
@@ -92,6 +105,17 @@ byte Picture::clamp(float value) {
     return (byte)(round(value));
 }
 
+byte Picture::clamp(int value) {
+    if (value > 255) {
+        return 255;
+    }
+    if (value < 0) {
+        return 0;
+    }
+    return (byte)(value);
+}
+
+
 byte Picture::getType() {
     return this->type;
 }
@@ -99,6 +123,8 @@ byte Picture::getType() {
 uint16 Picture::getTemporalReference() {
     return this->tmpRef;
 }
+
+
 
 
 
