@@ -64,7 +64,7 @@ private:
 
     void decodeSlice();
 
-    void decodeMacroblock(bool b);
+    void decodeMacroblock(bool firstMB);
 
     void sliceBeginReset();
 
@@ -89,7 +89,7 @@ private:
 
     void reconNonIntraDctCoef(int *dctRecon, int *dctZZ);
 
-    Block *locateBlock(int blockI);
+    void fillSkippedMacroblocks(int increment);
 };
 
 

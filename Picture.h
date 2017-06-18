@@ -6,6 +6,8 @@
 #define ITCT_MPEG1_PICTURE_H
 
 #include "TypeDefinition.h"
+#include "Block.h"
+
 class Picture {
 
 
@@ -22,26 +24,31 @@ public:
         const static byte D = 4;
     };
 
-    Picture(int height, int width, byte type, uint16 tmpRef);
+    Picture(unsigned int height, unsigned int width, byte type, uint16 tmpRef);
     Picture(const Picture& pic);
     Picture& operator=(const Picture& pic);
-    int getWidth();
-    int getHeight();
+    unsigned int getWidth();
+    unsigned int getHeight();
     unsigned char* getData();
     byte getType();
     uint16 getTemporalReference();
-    void toBGRAndCrop(int height, int width);
+    void toBGRAndCrop(unsigned int height, unsigned int width);
+    Block* getBlock(unsigned int mbCol, unsigned int mbRow, int blockI);
+    Block* getMacroblock(unsigned int mbCol, unsigned int mbRow, int cIdx);
+    Block* getMacroblock(unsigned int mbCol, unsigned int mbRow, int cIdx, int pelOffsetX, int pelOffsetY);
     static byte clamp(float value);
     static byte clamp(int value);
     ~Picture();
 
 private:
     byte* data;
-    int width;
-    int height;
+    unsigned int width;
+    unsigned int height;
     byte type;
     uint16 tmpRef;
     ColorMode colorMode;
+
+    unsigned int computeMBPelIdx(unsigned int mbCol, unsigned int mbRow);
 };
 
 #endif //ITCT_MPEG1_PICTURE_H

@@ -75,11 +75,11 @@ public:
         MacroblockTemporaryInfo(Sequence* seqRef) {
             this->seqRef = seqRef;
         }
-        int mbRow() {
-            return this->address / seqRef->getMBWidth();
+        unsigned int mbRow() {
+            return ((unsigned int)this->address) / seqRef->getMBWidth();
         }
-        int mbCol() {
-            return this->address % seqRef->getMBWidth();
+        unsigned int mbCol() {
+            return ((unsigned int)this->address) % seqRef->getMBWidth();
         }
     };
 
@@ -97,28 +97,34 @@ public:
 
     };
 
-    Sequence(int width, int height);
+    Sequence(unsigned int width, unsigned int height);
     Picture& newPicture(byte pictureType, uint16 tmpRef);
     Picture& currentPicture();
-    int getMBWidth();
-    int getMBHeight();
+    unsigned int getMBWidth();
+    unsigned int getMBHeight();
 
     PictureTemporaryInfo picTempInfo;
     SliceTemporaryInfo sliceTempInfo;
     MacroblockTemporaryInfo mbTempInfo;
     BlockTemporaryInfo blockTempInfo;
 
+    Picture &pastPictrue();
+
 private:
-    int width;
-    int height;
+    unsigned int width;
+    unsigned int height;
 
-    int mbWidth;
-    int mbHeight;
+    unsigned int mbWidth;
+    unsigned int mbHeight;
 
-    int extWidth;
-    int extHeight;
+    unsigned int extWidth;
+    unsigned int extHeight;
     std::list<Picture> picSeq;
 
+    Picture *pastPic;
+    Picture *futurePic;
+
+    Picture &futurePictrue();
 };
 
 

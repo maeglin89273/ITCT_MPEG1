@@ -103,4 +103,25 @@ void Block::add(int *data) {
     }
 }
 
+void Block::averageBlocksSet(Block **blocks, int length) {
+    for (int y = 0; y < this->height; y++) {
+        for (int x = 0; x < this->width; x++) {
+            int sum = 0;
+            for (int i = 0; i < length; i++) {
+                sum += blocks[i]->get(x, y);
+            }
+            this->set(x, y, Picture::clamp(sum / length));
+        }
+    }
+
+}
+
+void Block::set(Block &block) {
+    for (int y = 0; y < this->height; y++) {
+        for (int x = 0; x < this->width; x++) {
+            this->set(x, y, block.get(x, y));
+        }
+    }
+}
+
 

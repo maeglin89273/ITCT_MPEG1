@@ -19,12 +19,14 @@ private:
     int sX;
     int sY;
 public:
-    Block(byte *bufPtr, int height, int width, int cIdx, int superBlockWidth, int upScaleY=1, int upSscaleX=1);
+    Block(byte *bufPtr, int height, int width, int cIdx, int superBlockWidth, int upScaleY=1, int upScaleX=1);
     Block(byte *bufPtr, int height, int width, int cIdx);
     ~Block();
     void set(int x, int y, byte value);
     void set(int i, byte value);
     void set(int* data);
+    void averageBlocksSet(Block** blocks, int length);
+    void set(Block &block);
     void add(int x, int y, int value);
     void add(int i, int value);
     void add(int* data);

@@ -78,8 +78,8 @@ void MpegDecoder::hexPrint(bits data) {
 void MpegDecoder::decodeSeqHeader() {
 
     this->bitBuffer->skip(32); // seq header
-    int displayWidth = this->bitBuffer->consume(12);
-    int displayHeight = this->bitBuffer->consume(12);
+    unsigned int displayWidth = this->bitBuffer->consume(12);
+    unsigned int displayHeight = this->bitBuffer->consume(12);
     if (this->seq != nullptr) {
         delete this->seq;
     }
@@ -161,10 +161,10 @@ void MpegDecoder::decodeSlice() {
     this->bitBuffer->skip(1); // extra bit slice = 1
 
     sliceBeginReset();
-    bool beginMB = true;
+    bool firstMB = true;
     do {
-        decodeMacroblock(beginMB);
-        beginMB = false;
+        decodeMacroblock(firstMB);
+        firstMB = false;
     } while (!this->bitBuffer->nextBitsCompare(0, 23));
     // next start code is combined with the do-while loop in decodePicture
 }
@@ -172,17 +172,20 @@ void MpegDecoder::decodeSlice() {
 void MpegDecoder::sliceBeginReset() {
     this->seq->mbTempInfo.address = (this->seq->sliceTempInfo.sliceVerticalPosition - 1) * this->seq->getMBWidth() - 1;
     this->seq->mbTempInfo.pastIntraAddress = -2;
+
     // according to the standard 2.4.4.1
     this->seq->blockTempInfo.resetDcPast();
+
     // according to the standard 2.4.4.2
     this->seq->mbTempInfo.reconForVec.resetToZero();
     this->seq->mbTempInfo.preReconForVec.resetToZero();
+
     // according to the standard 2.4.4.3
     this->seq->mbTempInfo.reconBackVec.resetToZero();
     this->seq->mbTempInfo.preReconBackVec.resetToZero();
 }
 
-void MpegDecoder::decodeMacroblock(bool beginMB) {
+void MpegDecoder::decodeMacroblock(bool firstMB) {
     while (this->bitBuffer->nextBitsCompare(0x0f, 11)) {
         this->bitBuffer->skip(11); // macroblock stuffing
     }
@@ -195,12 +198,12 @@ void MpegDecoder::decodeMacroblock(bool beginMB) {
 
     mbAddressIncrement += HuffmanTable::decode(HuffmanTable::MACROBLOCK_ADDRESS_INCREMENT, this->bitBuffer);
 
-
-    this->seq->mbTempInfo.address += mbAddressIncrement;
-
-    // when encountering skipped macroblock
-    if (mbAddressIncrement > 1) {
+    // when encountering skipped macroblock. note we have to check it's not the first macroblock on slice
+    if (mbAddressIncrement > 1 && !firstMB) {
         this->skippedMacroblockReset();
+        this->fillSkippedMacroblocks(mbAddressIncrement);
+    } else {
+        this->seq->mbTempInfo.address += mbAddressIncrement;
     }
 
     byte type = (byte) HuffmanTable::decode(HuffmanTable::MACROBLOCK_TYPE_LIST[this->seq->currentPicture().getType()],
@@ -211,12 +214,13 @@ void MpegDecoder::decodeMacroblock(bool beginMB) {
     }
 
     byte mbIntra = this->seq->mbTempInfo.intra;
-    // note, if macroblock is intra, there is no motion information. This can be verified in type VLC table
+    // NOTE, if macroblock is intra, there is no motion information. This can be verified in type VLC table
     //so we skip checking motionForward and motionBackward flags if the macroblock is intra
     if (mbIntra) {
         //no motion inforamtion, according to the standard 2.4.4.2, reset reconstructed motion vectors to zeros
         this->seq->mbTempInfo.reconForVec.resetToZero();
         this->seq->mbTempInfo.preReconForVec.resetToZero();
+
         // according to the standard 2.4.4.3
         this->seq->mbTempInfo.reconBackVec.resetToZero();
         this->seq->mbTempInfo.preReconBackVec.resetToZero();
@@ -235,11 +239,14 @@ void MpegDecoder::decodeMacroblock(bool beginMB) {
             this->decodeReconMotionVec(picTempInfo.forwradF, picTempInfo.forwardRSize, picTempInfo.fullPelForwardVec,
                                        this->seq->mbTempInfo.reconForVec.vComp,
                                        this->seq->mbTempInfo.preReconForVec.vComp);
+
         } else if (this->seq->currentPicture().getType() == Picture::PictureType::P) {
             // no motion information in p frame, reset motion vectors to 0
             this->seq->mbTempInfo.reconForVec.resetToZero();
             this->seq->mbTempInfo.preReconForVec.resetToZero();
+
         }  else if (this->seq->currentPicture().getType() == Picture::PictureType::B) {
+            // according to the standard 2.4.4.3
             this->seq->mbTempInfo.reconForVec = this->seq->mbTempInfo.preReconForVec;
         }
 
@@ -252,10 +259,15 @@ void MpegDecoder::decodeMacroblock(bool beginMB) {
             this->decodeReconMotionVec(picTempInfo.backwardF, picTempInfo.backwardRSize, picTempInfo.fullPelBackwardVec,
                                        this->seq->mbTempInfo.reconBackVec.vComp,
                                        this->seq->mbTempInfo.preReconBackVec.vComp);
+
         } else if (this->seq->currentPicture().getType() == Picture::PictureType::B) {
+            // according to the standard 2.4.4.3
             this->seq->mbTempInfo.reconBackVec = this->seq->mbTempInfo.preReconBackVec;
         }
+
+        //TODO: apply motion vectors to this macroblock
     }
+
     byte cbp = 0;
     if (this->seq->mbTempInfo.pattern) {
         cbp = (byte) HuffmanTable::decode(HuffmanTable::CODE_BLOCK_PATTERN, this->bitBuffer);
@@ -312,6 +324,7 @@ void MpegDecoder::decodeReconMotionVec(byte f, byte rSize, byte fullPelVec, int 
     } else {
         reconVecComp = prevReconVecComp + big;
     }
+
     prevReconVecComp = reconVecComp;
     if (fullPelVec) {
         reconVecComp <<= 1;
@@ -371,27 +384,27 @@ void MpegDecoder::decodeBlock(int blockI, byte mbIntra) {
 
     this->bitBuffer->skip(2); // end of block = 2
 
-
     //start decoding read data
     int *dctRecon = new int[64];
 
-    Block* fill;
+    Block* targetBlock;
+    unsigned int mbCol = this->seq->mbTempInfo.mbCol();
+    unsigned int mbRow = this->seq->mbTempInfo.mbRow();
     if (mbIntra) {
         int &dcPast = blockI < 4 ? this->seq->blockTempInfo.dcYPast : (blockI == 4 ? this->seq->blockTempInfo.dcCbPast
                                                                                    : this->seq->blockTempInfo.dcCrPast);
         this->reconIntraDctCoef(blockI, dctRecon, this->dctZZ, dcPast);
         this->doIDCT(dctRecon);
-        fill = this->locateBlock(blockI);
-        fill->set(dctRecon);
+        targetBlock = this->seq->currentPicture().getBlock(mbCol, mbRow, blockI);
+        targetBlock->set(dctRecon);
     } else {
         this->reconNonIntraDctCoef(dctRecon, this->dctZZ);
         this->doIDCT(dctRecon);
-        fill = this->locateBlock(blockI);
-        fill->add(dctRecon);
+        targetBlock = this->seq->currentPicture().getBlock(mbCol, mbRow, blockI);
+        targetBlock->add(dctRecon);
     }
 
-    delete fill;
-
+    delete targetBlock;
 }
 
 void MpegDecoder::reconIntraDctCoef(int blockI, int *dctRecon, int *dctZZ, int &dcPast) {
@@ -496,7 +509,7 @@ void MpegDecoder::decodeRunLenCoeff(uint16 coeff, int& run, int& level) {
     else {
         run = coeff >> 8;
         level = coeff & 0xff;
-        if (this->bitBuffer->consumeOneBit()) {
+        if (this->bitBuffer->consumeOneBit()) { //last bit 's' for sign
             level = -level;
         }
     }
@@ -513,9 +526,37 @@ void MpegDecoder::doIDCT(int *coeffs) {
     }
 }
 
-Block *MpegDecoder::locateBlock(int blockI) {
-    return nullptr;
+void MpegDecoder::fillSkippedMacroblocks(int increment) {
+    Picture& prevPicture = this->seq->pastPictrue();
+    Picture& curPicture = this->seq->currentPicture();
+
+    for (int i = 0; i < increment - 1; i++) {
+        this->seq->mbTempInfo.address++;
+        unsigned int mbRow = this->seq->mbTempInfo.mbRow();
+        unsigned int mbCol = this->seq->mbTempInfo.mbCol();
+
+        Block* srcY = prevPicture.getMacroblock(mbCol, mbRow, 0);
+        Block* destY = curPicture.getMacroblock(mbCol, mbRow, 0);
+        Block* srcCb = prevPicture.getMacroblock(mbCol, mbRow, 1);
+        Block* destCb = curPicture.getMacroblock(mbCol, mbRow, 1);
+        Block* srcCr = prevPicture.getMacroblock(mbCol, mbRow, 2);
+        Block* destCr = curPicture.getMacroblock(mbCol, mbRow, 2);
+
+        destY->set(*srcY);
+        destCb->set(*srcCb);
+        destCr->set(*srcCr);
+
+        delete srcY;
+        delete destY;
+        delete srcCb;
+        delete destCb;
+        delete srcCr;
+        delete destCr;
+    }
+    this->seq->mbTempInfo.address++;
 }
+
+
 
 
 
