@@ -84,6 +84,15 @@ void Block::add(int i, int value) {
     this->add(x, y, value);
 }
 
+// this method is designed to do forward and backword motion vectors average
+void Block::addAndHalfSet(int x, int y, int value) {
+    for (int ty = sY * y; ty < sY * y + sY; ty++) {
+        for (int tx = sX * x; tx < sX * x + sX; tx++) {
+            this->ptr[tx * 3 + ty * this->sbWidth] = Picture::clamp((this->ptr[tx * 3 + ty * this->sbWidth] + value) / 2.0f);
+        }
+    }
+}
+
 void Block::set(int *data) {
     int i = 0;
     for (int y = 0; y < this->height; y++) {
@@ -110,11 +119,24 @@ void Block::averageBlocksSet(Block **blocks, int length) {
             for (int i = 0; i < length; i++) {
                 sum += blocks[i]->get(x, y);
             }
-            this->set(x, y, Picture::clamp(sum / length));
+            this->set(x, y, Picture::clamp(sum / (float) length));
         }
     }
 
 }
+
+void Block::addAverageAndHalfBlocksSet(Block **blocks, int length) {
+    for (int y = 0; y < this->height; y++) {
+        for (int x = 0; x < this->width; x++) {
+            int sum = 0;
+            for (int i = 0; i < length; i++) {
+                sum += blocks[i]->get(x, y);
+            }
+            this->addAndHalfSet(x, y, Picture::clamp(sum / (float) length));
+        }
+    }
+}
+
 
 void Block::set(Block &block) {
     for (int y = 0; y < this->height; y++) {
@@ -123,5 +145,16 @@ void Block::set(Block &block) {
         }
     }
 }
+
+void Block::addAndHalfSet(Block &block) {
+    for (int y = 0; y < this->height; y++) {
+        for (int x = 0; x < this->width; x++) {
+            this->addAndHalfSet(x, y, block.get(x, y));
+        }
+    }
+}
+
+
+
 
 

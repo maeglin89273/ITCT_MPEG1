@@ -34,6 +34,10 @@ public:
             this->hComp = 0;
             this->vComp = 0;
         }
+
+        bool hasMotion() {
+            return this->hComp != 0 || this->vComp != 0;
+        }
     };
     class PictureTemporaryInfo {
     public:
@@ -98,6 +102,7 @@ public:
     };
 
     Sequence(unsigned int width, unsigned int height);
+    ~Sequence();
     Picture& newPicture(byte pictureType, uint16 tmpRef);
     Picture& currentPicture();
     unsigned int getMBWidth();
@@ -109,6 +114,12 @@ public:
     BlockTemporaryInfo blockTempInfo;
 
     Picture &pastPictrue();
+    Picture &futurePictrue();
+
+    void toDisplay();
+    unsigned int length();
+
+    Picture **getPictureArray();
 
 private:
     unsigned int width;
@@ -120,11 +131,11 @@ private:
     unsigned int extWidth;
     unsigned int extHeight;
     std::list<Picture> picSeq;
-
+    Picture** displaySeq;
     Picture *pastPic;
     Picture *futurePic;
 
-    Picture &futurePictrue();
+
 };
 
 

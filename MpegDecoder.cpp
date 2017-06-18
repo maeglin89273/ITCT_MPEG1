@@ -59,7 +59,7 @@ MpegDecoder::~MpegDecoder() {
     delete this->seq;
 }
 
-void MpegDecoder::decode() {
+Sequence * MpegDecoder::decode() {
     this->bitBuffer->nextStartCodeLastByte();
     do  {
         this->decodeSeqHeader();
@@ -69,6 +69,9 @@ void MpegDecoder::decode() {
     } while (this->bitBuffer->nextStartCodeLastByteCompare(StartCodeLastByte::SEQ_HEADER));
     bits endSeqCode = this->bitBuffer->consume(32);
     this->hexPrint(endSeqCode);
+
+    this->seq->toDisplay();
+    return this->seq;
 }
 
 void MpegDecoder::hexPrint(bits data) {
@@ -266,6 +269,7 @@ void MpegDecoder::decodeMacroblock(bool firstMB) {
         }
 
         //TODO: apply motion vectors to this macroblock
+        this->fillMotionMacroblock(this->seq->mbTempInfo.reconForVec, this->seq->mbTempInfo.reconBackVec);
     }
 
     byte cbp = 0;
@@ -344,8 +348,10 @@ void MpegDecoder::skippedMacroblockReset() {
 
     if (this->seq->currentPicture().getType() == Picture::PictureType::B) {
         // no motion vector in skipped macroblock
-        this->seq->mbTempInfo.reconForVec = this->seq->mbTempInfo.preReconForVec;
-        this->seq->mbTempInfo.reconBackVec = this->seq->mbTempInfo.preReconBackVec;
+        this->seq->mbTempInfo.reconForVec.resetToZero();
+        this->seq->mbTempInfo.reconBackVec.resetToZero();
+        this->seq->mbTempInfo.preReconForVec.resetToZero();
+        this->seq->mbTempInfo.preReconBackVec.resetToZero();
     }
 }
 
@@ -556,7 +562,282 @@ void MpegDecoder::fillSkippedMacroblocks(int increment) {
     this->seq->mbTempInfo.address++;
 }
 
+void MpegDecoder::fillMotionMacroblock(Sequence::MotionVector &reconForVec, Sequence::MotionVector &reconBackVec) {
+    unsigned int mbRow = this->seq->mbTempInfo.mbRow();
+    unsigned int mbCol = this->seq->mbTempInfo.mbCol();
 
+    Picture& curPicture = this->seq->currentPicture();
+    Block* destY = curPicture.getMacroblock(mbCol, mbRow, 0);
+    Block* destCb = curPicture.getMacroblock(mbCol, mbRow, 1);
+    Block* destCr = curPicture.getMacroblock(mbCol, mbRow, 2);
+
+    if (!reconForVec.hasMotion() && !reconBackVec.hasMotion()) {
+        Picture& prevPicture = this->seq->pastPictrue();
+
+        Block* srcY = prevPicture.getMacroblock(mbCol, mbRow, 0);
+        Block* srcCb = prevPicture.getMacroblock(mbCol, mbRow, 1);
+        Block* srcCr = prevPicture.getMacroblock(mbCol, mbRow, 2);
+
+        destY->set(*srcY);
+        destCb->set(*srcCb);
+        destCr->set(*srcCr);
+
+
+        delete srcY;
+        delete srcCb;
+        delete srcCr;
+
+    } else if (reconForVec.hasMotion() && !reconBackVec.hasMotion()) {
+        this->fillSingleMotion(this->seq->pastPictrue(), mbCol, mbRow, reconForVec, destY, destCb, destCr);
+
+    } else if (!reconForVec.hasMotion() && reconBackVec.hasMotion()) {
+        this->fillSingleMotion(this->seq->futurePictrue(), mbCol, mbRow, reconBackVec, destY, destCb, destCr);
+    } else {
+        this->fillSingleMotion(this->seq->pastPictrue(), mbCol, mbRow, reconForVec, destY, destCb, destCr);
+        this->addAndHalfSingleMotion(this->seq->futurePictrue(), mbCol, mbRow, reconBackVec, destY, destCb, destCr);
+    }
+
+    delete destY;
+    delete destCb;
+    delete destCr;
+}
+
+void MpegDecoder::fillSingleMotion(Picture &refPicture, unsigned int mbCol, unsigned int mbRow,
+                                   Sequence::MotionVector &reconVec, Block *destY,
+                                   Block *destCb, Block *destCr) {
+    int rightY = reconVec.hComp >> 1;
+    int rightHalfY = reconVec.hComp - 2 * rightY;
+    int rightC = (reconVec.hComp / 2) >> 2;
+    int rightHalfC = (reconVec.hComp / 2) - 2 * rightC;
+    int downY = reconVec.vComp >> 1;
+    int downHalfY = reconVec.vComp - 2 * downY;
+    int downC = (reconVec.vComp / 2) >> 2;
+    int downHalfC = (reconVec.vComp / 2) - 2 * downC;
+
+    Block** srcBlocks = new Block*[4];
+
+    //fill Y
+    if (rightHalfY == 1) {
+        if (downHalfY == 1) {
+            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 0, rightY, downY);
+            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 0, rightY + 1, downY);
+            srcBlocks[2] = refPicture.getMacroblock(mbCol, mbRow, 0, rightY, downY + 1);
+            srcBlocks[3] = refPicture.getMacroblock(mbCol, mbRow, 0, rightY + 1, downY + 1);
+
+            destY->averageBlocksSet(srcBlocks, 4);
+            delete srcBlocks[0];
+            delete srcBlocks[1];
+            delete srcBlocks[2];
+            delete srcBlocks[3];
+        } else {
+            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 0, rightY, downY);
+            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 0, rightY + 1, downY);
+
+            destY->averageBlocksSet(srcBlocks, 2);
+            delete srcBlocks[0];
+            delete srcBlocks[1];
+        }
+    } else {
+        if (downHalfY == 1) {
+            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 0, rightY, downY);
+            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 0, rightY, downY + 1);
+
+            destY->averageBlocksSet(srcBlocks, 2);
+            delete srcBlocks[0];
+            delete srcBlocks[1];
+        } else {
+            Block* srcBlock = refPicture.getMacroblock(mbCol, mbRow, 0, rightY, downY);
+            destY->set(*srcBlock);
+            delete srcBlock;
+        }
+    }
+    // Cb, Cr
+    if (rightHalfC == 1) {
+        if (downHalfC == 1) {
+            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 1, rightC, downC);
+            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 1, rightC + 1, downC);
+            srcBlocks[2] = refPicture.getMacroblock(mbCol, mbRow, 1, rightC, downC + 1);
+            srcBlocks[3] = refPicture.getMacroblock(mbCol, mbRow, 1, rightC + 1, downC + 1);
+
+            destCb->averageBlocksSet(srcBlocks, 4);
+            delete srcBlocks[0];
+            delete srcBlocks[1];
+            delete srcBlocks[2];
+            delete srcBlocks[3];
+
+            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 2, rightC, downC);
+            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 2, rightC + 1, downC);
+            srcBlocks[2] = refPicture.getMacroblock(mbCol, mbRow, 2, rightC, downC + 1);
+            srcBlocks[3] = refPicture.getMacroblock(mbCol, mbRow, 2, rightC + 1, downC + 1);
+
+            destCr->averageBlocksSet(srcBlocks, 4);
+            delete srcBlocks[0];
+            delete srcBlocks[1];
+            delete srcBlocks[2];
+            delete srcBlocks[3];
+        } else {
+            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 1, rightC, downC);
+            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 1, rightC + 1, downC);
+
+            destCb->averageBlocksSet(srcBlocks, 2);
+            delete srcBlocks[0];
+            delete srcBlocks[1];
+
+            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 2, rightC, downC);
+            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 2, rightC + 1, downC);
+
+            destCr->averageBlocksSet(srcBlocks, 2);
+            delete srcBlocks[0];
+            delete srcBlocks[1];
+        }
+    } else {
+        if (downHalfC == 1) {
+            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 1, rightC, downC);
+            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 1, rightC, downC + 1);
+
+            destCb->averageBlocksSet(srcBlocks, 2);
+            delete srcBlocks[0];
+            delete srcBlocks[1];
+
+            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 2, rightC, downC);
+            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 2, rightC, downC + 1);
+
+            destCr->averageBlocksSet(srcBlocks, 2);
+            delete srcBlocks[0];
+            delete srcBlocks[1];
+        } else {
+            Block* srcBlock = refPicture.getMacroblock(mbCol, mbRow, 1, rightY, downY);
+            destCb->set(*srcBlock);
+            delete srcBlock;
+
+            srcBlock = refPicture.getMacroblock(mbCol, mbRow, 2, rightY, downY);
+            destCr->set(*srcBlock);
+            delete srcBlock;
+        }
+    }
+
+    delete srcBlocks;
+
+}
+
+// add the pel value and then divided by 2
+void MpegDecoder::addAndHalfSingleMotion(Picture &refPicture, unsigned int mbCol, unsigned int mbRow,
+                                   Sequence::MotionVector &reconVec, Block *destY,
+                                   Block *destCb, Block *destCr) {
+    int rightY = reconVec.hComp >> 1;
+    int rightHalfY = reconVec.hComp - 2 * rightY;
+    int rightC = (reconVec.hComp / 2) >> 2;
+    int rightHalfC = (reconVec.hComp / 2) - 2 * rightC;
+    int downY = reconVec.vComp >> 1;
+    int downHalfY = reconVec.vComp - 2 * downY;
+    int downC = (reconVec.vComp / 2) >> 2;
+    int downHalfC = (reconVec.vComp / 2) - 2 * downC;
+
+    Block** srcBlocks = new Block*[4];
+
+    //fill Y
+    if (rightHalfY == 1) {
+        if (downHalfY == 1) {
+            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 0, rightY, downY);
+            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 0, rightY + 1, downY);
+            srcBlocks[2] = refPicture.getMacroblock(mbCol, mbRow, 0, rightY, downY + 1);
+            srcBlocks[3] = refPicture.getMacroblock(mbCol, mbRow, 0, rightY + 1, downY + 1);
+
+            destY->addAverageAndHalfBlocksSet(srcBlocks, 4);
+            delete srcBlocks[0];
+            delete srcBlocks[1];
+            delete srcBlocks[2];
+            delete srcBlocks[3];
+        } else {
+            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 0, rightY, downY);
+            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 0, rightY + 1, downY);
+
+            destY->addAverageAndHalfBlocksSet(srcBlocks, 2);
+            delete srcBlocks[0];
+            delete srcBlocks[1];
+        }
+    } else {
+        if (downHalfY == 1) {
+            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 0, rightY, downY);
+            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 0, rightY, downY + 1);
+
+            destY->addAverageAndHalfBlocksSet(srcBlocks, 2);
+            delete srcBlocks[0];
+            delete srcBlocks[1];
+        } else {
+            Block* srcBlock = refPicture.getMacroblock(mbCol, mbRow, 0, rightY, downY);
+            destY->addAndHalfSet(*srcBlock);
+            delete srcBlock;
+        }
+    }
+    // Cb, Cr
+    if (rightHalfC == 1) {
+        if (downHalfC == 1) {
+            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 1, rightC, downC);
+            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 1, rightC + 1, downC);
+            srcBlocks[2] = refPicture.getMacroblock(mbCol, mbRow, 1, rightC, downC + 1);
+            srcBlocks[3] = refPicture.getMacroblock(mbCol, mbRow, 1, rightC + 1, downC + 1);
+
+            destCb->addAverageAndHalfBlocksSet(srcBlocks, 4);
+            delete srcBlocks[0];
+            delete srcBlocks[1];
+            delete srcBlocks[2];
+            delete srcBlocks[3];
+
+            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 2, rightC, downC);
+            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 2, rightC + 1, downC);
+            srcBlocks[2] = refPicture.getMacroblock(mbCol, mbRow, 2, rightC, downC + 1);
+            srcBlocks[3] = refPicture.getMacroblock(mbCol, mbRow, 2, rightC + 1, downC + 1);
+
+            destCr->addAverageAndHalfBlocksSet(srcBlocks, 4);
+            delete srcBlocks[0];
+            delete srcBlocks[1];
+            delete srcBlocks[2];
+            delete srcBlocks[3];
+        } else {
+            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 1, rightC, downC);
+            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 1, rightC + 1, downC);
+
+            destCb->addAverageAndHalfBlocksSet(srcBlocks, 2);
+            delete srcBlocks[0];
+            delete srcBlocks[1];
+
+            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 2, rightC, downC);
+            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 2, rightC + 1, downC);
+
+            destCr->addAverageAndHalfBlocksSet(srcBlocks, 2);
+            delete srcBlocks[0];
+            delete srcBlocks[1];
+        }
+    } else {
+        if (downHalfC == 1) {
+            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 1, rightC, downC);
+            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 1, rightC, downC + 1);
+
+            destCb->addAverageAndHalfBlocksSet(srcBlocks, 2);
+            delete srcBlocks[0];
+            delete srcBlocks[1];
+
+            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 2, rightC, downC);
+            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 2, rightC, downC + 1);
+
+            destCr->addAverageAndHalfBlocksSet(srcBlocks, 2);
+            delete srcBlocks[0];
+            delete srcBlocks[1];
+        } else {
+            Block* srcBlock = refPicture.getMacroblock(mbCol, mbRow, 1, rightY, downY);
+            destCb->addAndHalfSet(*srcBlock);
+            delete srcBlock;
+
+            srcBlock = refPicture.getMacroblock(mbCol, mbRow, 2, rightY, downY);
+            destCr->addAndHalfSet(*srcBlock);
+            delete srcBlock;
+        }
+    }
+
+    delete srcBlocks;
+
+}
 
 
 

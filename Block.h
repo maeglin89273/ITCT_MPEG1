@@ -38,6 +38,12 @@ public:
     void setBufferPtr(byte *bufPtr);
 
     void setCIndex(int cIdx);
+
+    void addAverageAndHalfBlocksSet(Block **blocks, int length);
+
+    void addAndHalfSet(int x, int y, int value);
+
+    void addAndHalfSet(Block &block);
 };
 
 

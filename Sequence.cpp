@@ -2,6 +2,7 @@
 // Created by maeglin89273 on 6/16/17.
 //
 
+#include <queue>
 #include "Sequence.h"
 
 Sequence::Sequence(unsigned int width, unsigned int height): mbTempInfo(this) {
@@ -11,11 +12,12 @@ Sequence::Sequence(unsigned int width, unsigned int height): mbTempInfo(this) {
     this->mbHeight = (height + 15) >> 4;
     this->extWidth = this->mbWidth << 4;
     this->extHeight = this->mbHeight << 4;
-    this->pastPic = this->futurePic = nullptr;
+    this->pastPic = this->futurePic =  nullptr;
+    this->displaySeq = nullptr;
 }
 
 Picture& Sequence::newPicture(byte pictureType, uint16 tmpRef) {
-    //TODO: manage past and future pictures here
+
     if (!this->picSeq.empty()) {
         Picture* potentialFuturePic = &this->currentPicture();
         if (potentialFuturePic->getType() != Picture::PictureType::B) {
@@ -49,5 +51,45 @@ unsigned int Sequence::getMBWidth() {
 
 unsigned int Sequence::getMBHeight() {
     return this->mbHeight;
+}
+
+void Sequence::toDisplay() {
+    if (this->displaySeq != nullptr) {
+        delete [] this->displaySeq;
+    }
+
+    int i = 0;
+    this->displaySeq = new Picture*[this->picSeq.size()];
+    Picture* past = &(this->picSeq.front());
+
+    std::list<Picture>::iterator it = this->picSeq.begin();
+    it++; //skip the first picture
+    for (; it != this->picSeq.end(); it++) {
+        if ((*it).getType() == Picture::PictureType::B) {
+            (*it).toBGRAndCrop(this->height, this->width);
+            this->displaySeq[i++] = &(*it);
+        } else {
+            past->toBGRAndCrop(this->height, this->width);
+            this->displaySeq[i++] = past;
+            past = &(*it);
+        }
+    }
+    past->toBGRAndCrop(this->height, this->width);
+    this->displaySeq[i] = past;
+}
+
+Sequence::~Sequence() {
+    if (this->displaySeq != nullptr) {
+        delete [] displaySeq;
+    }
+
+}
+
+unsigned int Sequence::length() {
+    return (unsigned int) this->picSeq.size();
+}
+
+Picture **Sequence::getPictureArray() {
+    return this->displaySeq;
 }
 

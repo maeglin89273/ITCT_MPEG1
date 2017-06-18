@@ -16,7 +16,7 @@ class MpegDecoder {
 public:
     MpegDecoder(BitBuffer* bitBuffer);
     ~MpegDecoder();
-    void decode();
+    Sequence * decode();
 
 private:
     BitBuffer* bitBuffer;
@@ -90,6 +90,17 @@ private:
     void reconNonIntraDctCoef(int *dctRecon, int *dctZZ);
 
     void fillSkippedMacroblocks(int increment);
+
+    void fillMotionMacroblock(Sequence::MotionVector &reconForVec, Sequence::MotionVector &reconBackVec);
+
+    void
+    fillSingleMotion(Picture &refPicture, unsigned int mbCol, unsigned int mbRow, Sequence::MotionVector &reconVec,
+                     Block *destY,
+                     Block *destCb, Block *destCr);
+
+    void
+    addAndHalfSingleMotion(Picture &refPicture, unsigned int mbCol, unsigned int mbRow, Sequence::MotionVector &reconVec,
+                           Block *destY, Block *destCb, Block *destCr);
 };
 
 

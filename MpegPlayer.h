@@ -8,6 +8,7 @@
 
 #include "BitBuffer.h"
 #include "MpegDecoder.h"
+#include <opencv2/opencv.hpp>
 
 class MpegPlayer {
 
@@ -18,6 +19,7 @@ private:
     BitBuffer bitBuffer;
     MpegDecoder decoder;
 //    Display display;
+    void writeSeq(Sequence *seq);
 };
 
 
