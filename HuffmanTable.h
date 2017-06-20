@@ -22,8 +22,9 @@ public:
     const static int MOTION[];
     const static int DC_SIZE_LUMINANCE[];
     const static int DC_SIZE_CHROMINANCE[];
-    const static int DCT_COEFF[];
-    static const int* MACROBLOCK_TYPE_LIST[];
+    const static int DCT_COEFF_FIRST[];
+    const static int DCT_COEFF_NEXT[];
+    const static int* MACROBLOCK_TYPE_LIST[];
 
     static int decode(const int* table, BitBuffer *buffer);
 

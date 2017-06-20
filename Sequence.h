@@ -9,6 +9,7 @@
 #include "Picture.h"
 #include <list>
 
+//The class stores and manages decoded data, and the picture order
 class Sequence {
 public:
     class MotionVector {
@@ -35,9 +36,7 @@ public:
             this->vComp = 0;
         }
 
-        bool hasMotion() {
-            return this->hComp != 0 || this->vComp != 0;
-        }
+
     };
     class PictureTemporaryInfo {
     public:
@@ -65,7 +64,6 @@ public:
         int address;
         int pastIntraAddress;
         byte quantScale;
-        byte type;
         byte quant;
         byte motionForward;
         byte motionBackward;
@@ -75,16 +73,16 @@ public:
         MotionVector preReconForVec;
         MotionVector reconBackVec;
         MotionVector preReconBackVec;
-        Sequence* seqRef;
-        MacroblockTemporaryInfo(Sequence* seqRef) {
-            this->seqRef = seqRef;
-        }
+
+        unsigned int mbWidthCache;
         unsigned int mbRow() {
-            return ((unsigned int)this->address) / seqRef->getMBWidth();
+            return ((unsigned int)this->address) / this->mbWidthCache;
         }
         unsigned int mbCol() {
-            return ((unsigned int)this->address) % seqRef->getMBWidth();
+            return ((unsigned int)this->address) % this->mbWidthCache;
         }
+
+
     };
 
     class BlockTemporaryInfo {
@@ -101,10 +99,14 @@ public:
 
     };
 
-    Sequence(unsigned int width, unsigned int height);
-    ~Sequence();
+    Sequence(unsigned int width, unsigned int height, float fps);
+
     Picture& newPicture(byte pictureType, uint16 tmpRef);
-    Picture& currentPicture();
+    bool hasDisplayPicture();
+    bool currentPictureTypeEquals(byte picType);
+
+    unsigned int getWidth();
+    unsigned int getHeight();
     unsigned int getMBWidth();
     unsigned int getMBHeight();
 
@@ -113,13 +115,15 @@ public:
     MacroblockTemporaryInfo mbTempInfo;
     BlockTemporaryInfo blockTempInfo;
 
-    Picture &pastPictrue();
-    Picture &futurePictrue();
+    Picture& currentPicture();
+    Picture &pastPicture();
+    Picture &futurePicture();
+    Picture& currentDisplayPicture();
 
-    void toDisplay();
+    byte** displaySequenceData();
     unsigned int length();
 
-    Picture **getPictureArray();
+    float getFps();
 
 private:
     unsigned int width;
@@ -130,11 +134,11 @@ private:
 
     unsigned int extWidth;
     unsigned int extHeight;
+    float fps;
     std::list<Picture> picSeq;
-    Picture** displaySeq;
     Picture *pastPic;
     Picture *futurePic;
-
+    Picture *curDispPic;
 
 };
 

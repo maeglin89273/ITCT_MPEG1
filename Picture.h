@@ -8,14 +8,10 @@
 #include "TypeDefinition.h"
 #include "Block.h"
 
+// The class for storing pixel values
 class Picture {
-
-
 public:
-    enum ColorMode {
-        Y_Cb_Cr, BGR
-    };
-    class PictureType {
+    class Type {
     public:
         const static byte FORBIDDEN = 0 ;
         const static byte I = 1;
@@ -32,10 +28,10 @@ public:
     unsigned char* getData();
     byte getType();
     uint16 getTemporalReference();
-    void toBGRAndCrop(unsigned int height, unsigned int width);
+    void toBGRAndCrop(byte* output, unsigned int cropHeight, unsigned int cropWidth);
     Block* getBlock(unsigned int mbCol, unsigned int mbRow, int blockI);
-    Block* getMacroblock(unsigned int mbCol, unsigned int mbRow, int cIdx);
-    Block* getMacroblock(unsigned int mbCol, unsigned int mbRow, int cIdx, int pelOffsetX, int pelOffsetY);
+    Block* getMacroblock(unsigned int mbCol, unsigned int mbRow, unsigned int cIdx);
+    Block* getMacroblock(unsigned int mbCol, unsigned int mbRow, unsigned int cIdx, int pelOffsetX, int pelOffsetY);
     static byte clamp(float value);
     static byte clamp(int value);
     ~Picture();
@@ -45,8 +41,7 @@ private:
     unsigned int width;
     unsigned int height;
     byte type;
-    uint16 tmpRef;
-    ColorMode colorMode;
+    uint16 tmpRef; // it's useless, actually
 
     unsigned int computeMBPelIdx(unsigned int mbCol, unsigned int mbRow);
 };

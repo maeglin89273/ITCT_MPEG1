@@ -10,6 +10,7 @@
 #include "TypeDefinition.h"
 
 typedef unsigned long buf_size_t;
+// The class for storing file in binary and manipulating the bit stream
 class BitBuffer {
 public:
     BitBuffer(char* fileName);
@@ -21,13 +22,13 @@ public:
     bits consume(byte count);
     void skip(byte count);
     bool nextBitsCompare(bits bs, byte count);
-
+    bool isLaodSuccess();
 private:
     byte* buffer;
     buf_size_t bitIdx; //bit indexing, not byte
     buf_size_t size;
 
-    void loadFile(char *fileName);
+    bool loadFile(char *fileName);
 
     buf_size_t estimateFileSize(std::ifstream& file);
     buf_size_t byteIdx(); //query the current byte index
@@ -35,6 +36,8 @@ private:
 
     bool isAtStartCode();
     void alignBytes();
+
+    bool loadSuccess;
 };
 
 

@@ -4,8 +4,6 @@
 
 #include <cstring>
 #include "MpegDecoder.h"
-#include "Sequence.h"
-#include "Block.h"
 
 const float MpegDecoder::FPS_TABLE[] = {0, 23.976f, 24.f, 25.f, 29.97f, 30.f, 50.f, 59.94f, 60.f};
 const int MpegDecoder::ZIG_ZAG_ORDER[] = {
@@ -30,8 +28,10 @@ const int MpegDecoder::ZIG_ZAG_ORDER_INVERSE[] = {
 
 
 
-MpegDecoder::MpegDecoder(BitBuffer *bitBuffer) {
+MpegDecoder::MpegDecoder(BitBuffer *bitBuffer, Renderer* renderer) {
     this->bitBuffer = bitBuffer;
+    this->renderer = renderer;
+    this->seq = nullptr;
     this->intraQuantMat = new byte[64] {8, 16, 19, 22, 26, 27, 29, 34, // default values
                                         16, 16, 22, 24, 27, 29, 34, 37,
                                         19, 22, 26, 27, 29, 34, 34, 38,
@@ -50,16 +50,20 @@ MpegDecoder::MpegDecoder(BitBuffer *bitBuffer) {
                                         16, 16, 16, 16, 16, 16, 16, 16,
                                         16, 16, 16, 16, 16, 16, 16, 16};
     this->dctZZ = new int[64];
+
 }
 
 MpegDecoder::~MpegDecoder() {
-    delete [] this->intraQuantMat;
-    delete [] this->nonIntraQuantMat;
-    delete [] this->dctZZ;
-    delete this->seq;
+    delete[] this->intraQuantMat;
+    delete[] this->nonIntraQuantMat;
+    delete[] this->dctZZ;
+    if (this->seq != nullptr) {
+        delete this->seq;
+    }
 }
 
 Sequence * MpegDecoder::decode() {
+    //follow the standard structure
     this->bitBuffer->nextStartCodeLastByte();
     do  {
         this->decodeSeqHeader();
@@ -67,15 +71,16 @@ Sequence * MpegDecoder::decode() {
             this->decodeGroupOfPictures();
         } while (this->bitBuffer->nextStartCodeLastByteCompare(StartCodeLastByte::GROUP));
     } while (this->bitBuffer->nextStartCodeLastByteCompare(StartCodeLastByte::SEQ_HEADER));
+
     bits endSeqCode = this->bitBuffer->consume(32);
-    this->hexPrint(endSeqCode);
 
-    this->seq->toDisplay();
+    if (endSeqCode == 0x1b7) { // does equal to end sequence code?
+        std::cout << "decode successfully" << std::endl;
+    } else {
+        std::cout << "decode fail" << std::endl;
+    }
+
     return this->seq;
-}
-
-void MpegDecoder::hexPrint(bits data) {
-    std::cout << std::hex << data << std::endl;
 }
 
 void MpegDecoder::decodeSeqHeader() {
@@ -83,12 +88,14 @@ void MpegDecoder::decodeSeqHeader() {
     this->bitBuffer->skip(32); // seq header
     unsigned int displayWidth = this->bitBuffer->consume(12);
     unsigned int displayHeight = this->bitBuffer->consume(12);
+
+    this->bitBuffer->skip(4); // skip aspect ratio
+
     if (this->seq != nullptr) {
         delete this->seq;
     }
-    this->seq = new Sequence(displayHeight, displayWidth);
-    this->bitBuffer->skip(4); // skip aspect ratio
-    this->fps = MpegDecoder::FPS_TABLE[(int)this->bitBuffer->consume(4)];
+
+    this->seq = new Sequence(displayWidth, displayHeight, MpegDecoder::FPS_TABLE[(int)this->bitBuffer->consume(4)]);
     this->bitBuffer->skip(18); //  bit rate
     this->bitBuffer->skip(1); // marker bit
     this->bitBuffer->skip(10); // vbv buffer size
@@ -115,6 +122,11 @@ void MpegDecoder::decodeGroupOfPictures() {
     this->consumeExtAndUserData();
     do {
         this->decodePicture();
+
+        //realtime display
+        if (this->seq->hasDisplayPicture()) {
+            this->renderer->render(this->seq->currentDisplayPicture(), this->seq->getFps(), this->seq->getHeight(), this->seq->getWidth());
+        }
     } while (this->bitBuffer->nextStartCodeLastByteCompare(StartCodeLastByte::PIC));
 
 }
@@ -123,19 +135,19 @@ void MpegDecoder::decodePicture() {
     this->bitBuffer->skip(32); // picture start code
     uint16 tmpRef = (uint16) this->bitBuffer->consume(10);
     byte picType = (byte) this->bitBuffer->consume(3);
-    if (picType == Picture::PictureType::FORBIDDEN || picType == Picture::PictureType::D) {
+    if (picType == Picture::Type::FORBIDDEN || picType == Picture::Type::D) {
         std::cout << "picture type error" << std::endl;
+        std::cout << picType << std::endl;
         return;
     }
     this->seq->newPicture(picType, tmpRef);
     this->bitBuffer->skip(16); // vbv delay
 
-
-    if (picType == Picture::PictureType::P || picType == Picture::PictureType::B) {
+    if (picType == Picture::Type::P || picType == Picture::Type::B) {
         this->consumePicForwardBackwardCode(this->seq->picTempInfo.fullPelForwardVec, this->seq->picTempInfo.forwardRSize, this->seq->picTempInfo.forwradF);
     }
 
-    if (picType == Picture::PictureType::B) {
+    if (picType == Picture::Type::B) {
         this->consumePicForwardBackwardCode(this->seq->picTempInfo.fullPelBackwardVec, this->seq->picTempInfo.backwardRSize, this->seq->picTempInfo.backwardF);
     }
 
@@ -243,32 +255,33 @@ void MpegDecoder::decodeMacroblock(bool firstMB) {
                                        this->seq->mbTempInfo.reconForVec.vComp,
                                        this->seq->mbTempInfo.preReconForVec.vComp);
 
-        } else if (this->seq->currentPicture().getType() == Picture::PictureType::P) {
+        } else if (this->seq->currentPictureTypeEquals(Picture::Type::P)) {
             // no motion information in p frame, reset motion vectors to 0
             this->seq->mbTempInfo.reconForVec.resetToZero();
             this->seq->mbTempInfo.preReconForVec.resetToZero();
 
-        }  else if (this->seq->currentPicture().getType() == Picture::PictureType::B) {
+        }  else if (this->seq->currentPictureTypeEquals(Picture::Type::B)) {
             // according to the standard 2.4.4.3
+            // note, it should not be used in building current macroblock, the standard is misleading
             this->seq->mbTempInfo.reconForVec = this->seq->mbTempInfo.preReconForVec;
         }
 
         if (this->seq->mbTempInfo.motionBackward) {
             // backward H
             this->decodeReconMotionVec(picTempInfo.backwardF, picTempInfo.backwardRSize, picTempInfo.fullPelBackwardVec,
-                                       this->seq->mbTempInfo.reconForVec.hComp,
-                                       this->seq->mbTempInfo.preReconForVec.hComp);
+                                       this->seq->mbTempInfo.reconBackVec.hComp,
+                                       this->seq->mbTempInfo.preReconBackVec.hComp);
             // backward V
             this->decodeReconMotionVec(picTempInfo.backwardF, picTempInfo.backwardRSize, picTempInfo.fullPelBackwardVec,
                                        this->seq->mbTempInfo.reconBackVec.vComp,
                                        this->seq->mbTempInfo.preReconBackVec.vComp);
 
-        } else if (this->seq->currentPicture().getType() == Picture::PictureType::B) {
+        } else if (this->seq->currentPictureTypeEquals(Picture::Type::B)) {
             // according to the standard 2.4.4.3
+            // NOTE, it should not be used in building current macroblock, the standard is misleading
             this->seq->mbTempInfo.reconBackVec = this->seq->mbTempInfo.preReconBackVec;
         }
 
-        //TODO: apply motion vectors to this macroblock
         this->fillMotionMacroblock(this->seq->mbTempInfo.reconForVec, this->seq->mbTempInfo.reconBackVec);
     }
 
@@ -293,9 +306,9 @@ void MpegDecoder::decodeMacroblock(bool firstMB) {
         this->seq->mbTempInfo.pastIntraAddress = this->seq->mbTempInfo.address;
     }
 
-    //impossible being D frame
+//    impossible being D frame
 //
-//    if (this->seq->currentPicture().getType() == Picture::PictureType::D) {
+//    if (this->seq->currentPictureTypeEquals( Picture::Type::D)) {
 //        this->bitBuffer->skip(1); // end of macroblock
 //    }
 }
@@ -340,19 +353,17 @@ void MpegDecoder::skippedMacroblockReset() {
     // reset dct dc past, according to the standard 2.4.4.1
     this->seq->blockTempInfo.resetDcPast();
 
-    if (this->seq->currentPicture().getType() == Picture::PictureType::P) {
+    if (this->seq->currentPictureTypeEquals(Picture::Type::P)) {
         // set reconstructed motion vectors to zero
         this->seq->mbTempInfo.reconForVec.resetToZero();
         this->seq->mbTempInfo.preReconForVec.resetToZero();
     }
 
-    if (this->seq->currentPicture().getType() == Picture::PictureType::B) {
-        // no motion vector in skipped macroblock
-        this->seq->mbTempInfo.reconForVec.resetToZero();
-        this->seq->mbTempInfo.reconBackVec.resetToZero();
-        this->seq->mbTempInfo.preReconForVec.resetToZero();
-        this->seq->mbTempInfo.preReconBackVec.resetToZero();
-    }
+//    if (this->seq->currentPictureTypeEquals(Picture::Type::B)) {
+//        // according to the standard 2.4.4.4
+//        // Encountering skipped macroblock, it will have the same motion type as the prior macroblock in B frame
+//        // The macroblock decoding part will handle this, so we don't have to do any reset for motion vectors
+//    }
 }
 
 void MpegDecoder::decodeBlock(int blockI, byte mbIntra) {
@@ -365,7 +376,7 @@ void MpegDecoder::decodeBlock(int blockI, byte mbIntra) {
         byte dcSize = (byte) HuffmanTable::decode(sizeTable, this->bitBuffer);
         if (dcSize) {
             byte dcDiff = (byte) bitBuffer->consume(dcSize);
-            if (dcDiff & (1 << (dcSize - 1))) {
+            if (dcDiff & (byte)(1 << (dcSize - 1))) {
                 this->dctZZ[0] = dcDiff;
             } else {
                 this->dctZZ[0] = (-1 << (dcSize)) | (dcDiff + 1);
@@ -373,7 +384,7 @@ void MpegDecoder::decodeBlock(int blockI, byte mbIntra) {
         }
 
     } else {
-        uint16 coeffFirst = (uint16) HuffmanTable::decode(HuffmanTable::DCT_COEFF, this->bitBuffer);
+        uint16 coeffFirst = (uint16) HuffmanTable::decode(HuffmanTable::DCT_COEFF_FIRST, this->bitBuffer);
         this->decodeRunLenCoeff(coeffFirst, run, level);
         i = run;
         this->dctZZ[i] = level;
@@ -382,7 +393,7 @@ void MpegDecoder::decodeBlock(int blockI, byte mbIntra) {
 
     // skip checking picture type is not D type
     while (!this->bitBuffer->nextBitsCompare(2, 2)) {
-        uint16 coeffNext = (uint16) HuffmanTable::decode(HuffmanTable::DCT_COEFF, this->bitBuffer);
+        uint16 coeffNext = (uint16) HuffmanTable::decode(HuffmanTable::DCT_COEFF_NEXT, this->bitBuffer);
         this->decodeRunLenCoeff(coeffNext, run, level);
         i += run + 1;
         this->dctZZ[i] = level;
@@ -400,16 +411,17 @@ void MpegDecoder::decodeBlock(int blockI, byte mbIntra) {
         int &dcPast = blockI < 4 ? this->seq->blockTempInfo.dcYPast : (blockI == 4 ? this->seq->blockTempInfo.dcCbPast
                                                                                    : this->seq->blockTempInfo.dcCrPast);
         this->reconIntraDctCoef(blockI, dctRecon, this->dctZZ, dcPast);
-        this->doIDCT(dctRecon);
+        this->fidct.doFIDCT(dctRecon);
         targetBlock = this->seq->currentPicture().getBlock(mbCol, mbRow, blockI);
         targetBlock->set(dctRecon);
     } else {
         this->reconNonIntraDctCoef(dctRecon, this->dctZZ);
-        this->doIDCT(dctRecon);
+        this->fidct.doFIDCT(dctRecon);
         targetBlock = this->seq->currentPicture().getBlock(mbCol, mbRow, blockI);
         targetBlock->add(dctRecon);
     }
 
+    delete dctRecon;
     delete targetBlock;
 }
 
@@ -426,11 +438,14 @@ void MpegDecoder::reconIntraDctCoef(int blockI, int *dctRecon, int *dctZZ, int &
         }
     }
     dctRecon[0] = this->dctZZ[0] * 8;
-    if (blockI < 1 || blockI > 3) {
-        if ((this->seq->mbTempInfo.address - this->seq->mbTempInfo.pastIntraAddress > 1))
+    if (blockI < 1 || blockI > 3) { //block 0, 4, 5
+        if (this->seq->mbTempInfo.address - this->seq->mbTempInfo.pastIntraAddress > 1) {
             dctRecon[0] += 128 * 8;
-        else
+        } else {
             dctRecon[0] += dcPast;
+        }
+    } else {
+        dctRecon[0] += dcPast;
     }
     dcPast = dctRecon[0];
 }
@@ -453,10 +468,10 @@ void MpegDecoder::reconNonIntraDctCoef(int *dctRecon, int *dctZZ) {
 }
 
 void MpegDecoder::decodeMacroblockType(byte type) {
-    this->seq->mbTempInfo.quant = (byte) (type & 0x10);
-    this->seq->mbTempInfo.motionForward = (byte) (type & 0x08);
-    this->seq->mbTempInfo.motionBackward = (byte) (type & 0x04);
-    this->seq->mbTempInfo.pattern = (byte) (type & 0x02);
+    this->seq->mbTempInfo.quant = (byte) ((type & 0x10) >> 4);
+    this->seq->mbTempInfo.motionForward = (byte) ((type & 0x08) >> 3);
+    this->seq->mbTempInfo.motionBackward = (byte) ((type & 0x04) >> 2) ;
+    this->seq->mbTempInfo.pattern = (byte) ((type & 0x02) >> 1);
     this->seq->mbTempInfo.intra = (byte) (type & 0x01);
 }
 
@@ -525,15 +540,9 @@ int MpegDecoder::sign(int val) {
     return (val > 0) - (val < 0);
 }
 
-void MpegDecoder::doIDCT(int *coeffs) {
-    this->fidct.doFIDCT(coeffs);
-    for (int i = 0; i < 64; i++) {
-        coeffs[i] += 128;
-    }
-}
 
 void MpegDecoder::fillSkippedMacroblocks(int increment) {
-    Picture& prevPicture = this->seq->pastPictrue();
+    Picture& prevPicture = this->seq->pastPicture();
     Picture& curPicture = this->seq->currentPicture();
 
     for (int i = 0; i < increment - 1; i++) {
@@ -571,8 +580,11 @@ void MpegDecoder::fillMotionMacroblock(Sequence::MotionVector &reconForVec, Sequ
     Block* destCb = curPicture.getMacroblock(mbCol, mbRow, 1);
     Block* destCr = curPicture.getMacroblock(mbCol, mbRow, 2);
 
-    if (!reconForVec.hasMotion() && !reconBackVec.hasMotion()) {
-        Picture& prevPicture = this->seq->pastPictrue();
+    bool hasForMotion = this->seq->mbTempInfo.motionForward != 0;
+    bool hasBackMotion = this->seq->mbTempInfo.motionBackward != 0;
+
+    if (!hasForMotion && !hasBackMotion) {
+        Picture& prevPicture = this->seq->pastPicture();
 
         Block* srcY = prevPicture.getMacroblock(mbCol, mbRow, 0);
         Block* srcCb = prevPicture.getMacroblock(mbCol, mbRow, 1);
@@ -587,14 +599,14 @@ void MpegDecoder::fillMotionMacroblock(Sequence::MotionVector &reconForVec, Sequ
         delete srcCb;
         delete srcCr;
 
-    } else if (reconForVec.hasMotion() && !reconBackVec.hasMotion()) {
-        this->fillSingleMotion(this->seq->pastPictrue(), mbCol, mbRow, reconForVec, destY, destCb, destCr);
+    } else if (hasForMotion && !hasBackMotion) {
+        this->fillSingleMotion(this->seq->pastPicture(), mbCol, mbRow, reconForVec, destY, destCb, destCr);
 
-    } else if (!reconForVec.hasMotion() && reconBackVec.hasMotion()) {
-        this->fillSingleMotion(this->seq->futurePictrue(), mbCol, mbRow, reconBackVec, destY, destCb, destCr);
+    } else if (!hasForMotion && hasBackMotion) {
+        this->fillSingleMotion(this->seq->futurePicture(), mbCol, mbRow, reconBackVec, destY, destCb, destCr);
     } else {
-        this->fillSingleMotion(this->seq->pastPictrue(), mbCol, mbRow, reconForVec, destY, destCb, destCr);
-        this->addAndHalfSingleMotion(this->seq->futurePictrue(), mbCol, mbRow, reconBackVec, destY, destCb, destCr);
+        this->fillSingleMotion(this->seq->pastPicture(), mbCol, mbRow, reconForVec, destY, destCb, destCr);
+        this->addAndHalfSingleMotion(this->seq->futurePicture(), mbCol, mbRow, reconBackVec, destY, destCb, destCr);
     }
 
     delete destY;
@@ -605,59 +617,38 @@ void MpegDecoder::fillMotionMacroblock(Sequence::MotionVector &reconForVec, Sequ
 void MpegDecoder::fillSingleMotion(Picture &refPicture, unsigned int mbCol, unsigned int mbRow,
                                    Sequence::MotionVector &reconVec, Block *destY,
                                    Block *destCb, Block *destCr) {
-    int rightY = reconVec.hComp >> 1;
-    int rightHalfY = reconVec.hComp - 2 * rightY;
-    int rightC = (reconVec.hComp / 2) >> 2;
-    int rightHalfC = (reconVec.hComp / 2) - 2 * rightC;
-    int downY = reconVec.vComp >> 1;
-    int downHalfY = reconVec.vComp - 2 * downY;
-    int downC = (reconVec.vComp / 2) >> 2;
-    int downHalfC = (reconVec.vComp / 2) - 2 * downC;
+    int right = reconVec.hComp >> 1;
+    int rightHalf = reconVec.hComp - 2 * right;
+    int down = reconVec.vComp >> 1;
+    int downHalf = reconVec.vComp - 2 * down;
+
+    //We don't follow the standard when calculating chrominance motion vector,
+    // since we upscale the chrominance macroblock beforhand
+//    int rightC = (reconVec.hComp / 2) >> 2;
+//    int rightHalfC = (reconVec.hComp / 2) - 2 * rightC;
+//    int downC = (reconVec.vComp / 2) >> 2;
+//    int downHalfC = (reconVec.vComp / 2) - 2 * downC;
 
     Block** srcBlocks = new Block*[4];
 
     //fill Y
-    if (rightHalfY == 1) {
-        if (downHalfY == 1) {
-            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 0, rightY, downY);
-            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 0, rightY + 1, downY);
-            srcBlocks[2] = refPicture.getMacroblock(mbCol, mbRow, 0, rightY, downY + 1);
-            srcBlocks[3] = refPicture.getMacroblock(mbCol, mbRow, 0, rightY + 1, downY + 1);
+    if (rightHalf == 1) {
+        if (downHalf == 1) {
+            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 0, right, down);
+            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 0, right + 1, down);
+            srcBlocks[2] = refPicture.getMacroblock(mbCol, mbRow, 0, right, down + 1);
+            srcBlocks[3] = refPicture.getMacroblock(mbCol, mbRow, 0, right + 1, down + 1);
 
             destY->averageBlocksSet(srcBlocks, 4);
             delete srcBlocks[0];
             delete srcBlocks[1];
             delete srcBlocks[2];
             delete srcBlocks[3];
-        } else {
-            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 0, rightY, downY);
-            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 0, rightY + 1, downY);
 
-            destY->averageBlocksSet(srcBlocks, 2);
-            delete srcBlocks[0];
-            delete srcBlocks[1];
-        }
-    } else {
-        if (downHalfY == 1) {
-            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 0, rightY, downY);
-            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 0, rightY, downY + 1);
-
-            destY->averageBlocksSet(srcBlocks, 2);
-            delete srcBlocks[0];
-            delete srcBlocks[1];
-        } else {
-            Block* srcBlock = refPicture.getMacroblock(mbCol, mbRow, 0, rightY, downY);
-            destY->set(*srcBlock);
-            delete srcBlock;
-        }
-    }
-    // Cb, Cr
-    if (rightHalfC == 1) {
-        if (downHalfC == 1) {
-            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 1, rightC, downC);
-            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 1, rightC + 1, downC);
-            srcBlocks[2] = refPicture.getMacroblock(mbCol, mbRow, 1, rightC, downC + 1);
-            srcBlocks[3] = refPicture.getMacroblock(mbCol, mbRow, 1, rightC + 1, downC + 1);
+            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 1, right, down);
+            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 1, right + 1, down);
+            srcBlocks[2] = refPicture.getMacroblock(mbCol, mbRow, 1, right, down + 1);
+            srcBlocks[3] = refPicture.getMacroblock(mbCol, mbRow, 1, right + 1, down + 1);
 
             destCb->averageBlocksSet(srcBlocks, 4);
             delete srcBlocks[0];
@@ -665,10 +656,10 @@ void MpegDecoder::fillSingleMotion(Picture &refPicture, unsigned int mbCol, unsi
             delete srcBlocks[2];
             delete srcBlocks[3];
 
-            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 2, rightC, downC);
-            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 2, rightC + 1, downC);
-            srcBlocks[2] = refPicture.getMacroblock(mbCol, mbRow, 2, rightC, downC + 1);
-            srcBlocks[3] = refPicture.getMacroblock(mbCol, mbRow, 2, rightC + 1, downC + 1);
+            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 2, right, down);
+            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 2, right + 1, down);
+            srcBlocks[2] = refPicture.getMacroblock(mbCol, mbRow, 2, right, down + 1);
+            srcBlocks[3] = refPicture.getMacroblock(mbCol, mbRow, 2, right + 1, down + 1);
 
             destCr->averageBlocksSet(srcBlocks, 4);
             delete srcBlocks[0];
@@ -676,41 +667,59 @@ void MpegDecoder::fillSingleMotion(Picture &refPicture, unsigned int mbCol, unsi
             delete srcBlocks[2];
             delete srcBlocks[3];
         } else {
-            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 1, rightC, downC);
-            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 1, rightC + 1, downC);
+            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 0, right, down);
+            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 0, right + 1, down);
+
+            destY->averageBlocksSet(srcBlocks, 2);
+            delete srcBlocks[0];
+            delete srcBlocks[1];
+
+            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 1, right, down);
+            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 1, right + 1, down);
 
             destCb->averageBlocksSet(srcBlocks, 2);
             delete srcBlocks[0];
             delete srcBlocks[1];
 
-            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 2, rightC, downC);
-            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 2, rightC + 1, downC);
+            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 2, right, down);
+            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 2, right + 1, down);
 
             destCr->averageBlocksSet(srcBlocks, 2);
             delete srcBlocks[0];
             delete srcBlocks[1];
         }
     } else {
-        if (downHalfC == 1) {
-            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 1, rightC, downC);
-            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 1, rightC, downC + 1);
+        if (downHalf == 1) {
+            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 0, right, down);
+            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 0, right, down + 1);
+
+            destY->averageBlocksSet(srcBlocks, 2);
+            delete srcBlocks[0];
+            delete srcBlocks[1];
+
+            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 1, right, down);
+            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 1, right, down + 1);
 
             destCb->averageBlocksSet(srcBlocks, 2);
             delete srcBlocks[0];
             delete srcBlocks[1];
 
-            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 2, rightC, downC);
-            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 2, rightC, downC + 1);
+            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 2, right, down);
+            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 2, right, down + 1);
 
             destCr->averageBlocksSet(srcBlocks, 2);
             delete srcBlocks[0];
             delete srcBlocks[1];
         } else {
-            Block* srcBlock = refPicture.getMacroblock(mbCol, mbRow, 1, rightY, downY);
+            Block* srcBlock = refPicture.getMacroblock(mbCol, mbRow, 0, right, down);
+            destY->set(*srcBlock);
+            delete srcBlock;
+
+            srcBlock = refPicture.getMacroblock(mbCol, mbRow, 1, right, down);
             destCb->set(*srcBlock);
             delete srcBlock;
 
-            srcBlock = refPicture.getMacroblock(mbCol, mbRow, 2, rightY, downY);
+            srcBlock = refPicture.getMacroblock(mbCol, mbRow, 2, right, down);
             destCr->set(*srcBlock);
             delete srcBlock;
         }
@@ -724,112 +733,109 @@ void MpegDecoder::fillSingleMotion(Picture &refPicture, unsigned int mbCol, unsi
 void MpegDecoder::addAndHalfSingleMotion(Picture &refPicture, unsigned int mbCol, unsigned int mbRow,
                                    Sequence::MotionVector &reconVec, Block *destY,
                                    Block *destCb, Block *destCr) {
-    int rightY = reconVec.hComp >> 1;
-    int rightHalfY = reconVec.hComp - 2 * rightY;
-    int rightC = (reconVec.hComp / 2) >> 2;
-    int rightHalfC = (reconVec.hComp / 2) - 2 * rightC;
-    int downY = reconVec.vComp >> 1;
-    int downHalfY = reconVec.vComp - 2 * downY;
-    int downC = (reconVec.vComp / 2) >> 2;
-    int downHalfC = (reconVec.vComp / 2) - 2 * downC;
+    int right = reconVec.hComp >> 1;
+    int rightHalf = reconVec.hComp - 2 * right;
+    int down = reconVec.vComp >> 1;
+    int downHalf = reconVec.vComp - 2 * down;
+
+    //We don't follow the standard when calculating chrominance motion vector,
+    // since we upscale the chrominance macroblock beforhand
+//    int rightC = (reconVec.hComp / 2) >> 2;
+//    int rightHalfC = (reconVec.hComp / 2) - 2 * rightC;
+//    int downC = (reconVec.vComp / 2) >> 2;
+//    int downHalfC = (reconVec.vComp / 2) - 2 * downC;
 
     Block** srcBlocks = new Block*[4];
 
     //fill Y
-    if (rightHalfY == 1) {
-        if (downHalfY == 1) {
-            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 0, rightY, downY);
-            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 0, rightY + 1, downY);
-            srcBlocks[2] = refPicture.getMacroblock(mbCol, mbRow, 0, rightY, downY + 1);
-            srcBlocks[3] = refPicture.getMacroblock(mbCol, mbRow, 0, rightY + 1, downY + 1);
+    if (rightHalf == 1) {
+        if (downHalf == 1) {
+            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 0, right, down);
+            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 0, right + 1, down);
+            srcBlocks[2] = refPicture.getMacroblock(mbCol, mbRow, 0, right, down + 1);
+            srcBlocks[3] = refPicture.getMacroblock(mbCol, mbRow, 0, right + 1, down + 1);
 
-            destY->addAverageAndHalfBlocksSet(srcBlocks, 4);
+            destY->addAverageBlocksAndHalfSet(srcBlocks, 4);
+            delete srcBlocks[0];
+            delete srcBlocks[1];
+            delete srcBlocks[2];
+            delete srcBlocks[3];
+
+            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 1, right, down);
+            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 1, right + 1, down);
+            srcBlocks[2] = refPicture.getMacroblock(mbCol, mbRow, 1, right, down + 1);
+            srcBlocks[3] = refPicture.getMacroblock(mbCol, mbRow, 1, right + 1, down + 1);
+
+            destCb->addAverageBlocksAndHalfSet(srcBlocks, 4);
+            delete srcBlocks[0];
+            delete srcBlocks[1];
+            delete srcBlocks[2];
+            delete srcBlocks[3];
+
+            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 2, right, down);
+            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 2, right + 1, down);
+            srcBlocks[2] = refPicture.getMacroblock(mbCol, mbRow, 2, right, down + 1);
+            srcBlocks[3] = refPicture.getMacroblock(mbCol, mbRow, 2, right + 1, down + 1);
+
+            destCr->addAverageBlocksAndHalfSet(srcBlocks, 4);
             delete srcBlocks[0];
             delete srcBlocks[1];
             delete srcBlocks[2];
             delete srcBlocks[3];
         } else {
-            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 0, rightY, downY);
-            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 0, rightY + 1, downY);
+            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 0, right, down);
+            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 0, right + 1, down);
 
-            destY->addAverageAndHalfBlocksSet(srcBlocks, 2);
+            destY->addAverageBlocksAndHalfSet(srcBlocks, 2);
+            delete srcBlocks[0];
+            delete srcBlocks[1];
+
+            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 1, right, down);
+            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 1, right + 1, down);
+
+            destCb->addAverageBlocksAndHalfSet(srcBlocks, 2);
+            delete srcBlocks[0];
+            delete srcBlocks[1];
+
+            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 2, right, down);
+            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 2, right + 1, down);
+
+            destCr->addAverageBlocksAndHalfSet(srcBlocks, 2);
             delete srcBlocks[0];
             delete srcBlocks[1];
         }
     } else {
-        if (downHalfY == 1) {
-            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 0, rightY, downY);
-            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 0, rightY, downY + 1);
+        if (downHalf == 1) {
+            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 0, right, down);
+            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 0, right, down + 1);
 
-            destY->addAverageAndHalfBlocksSet(srcBlocks, 2);
+            destY->addAverageBlocksAndHalfSet(srcBlocks, 2);
+            delete srcBlocks[0];
+            delete srcBlocks[1];
+
+            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 1, right, down);
+            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 1, right, down + 1);
+
+            destCb->addAverageBlocksAndHalfSet(srcBlocks, 2);
+            delete srcBlocks[0];
+            delete srcBlocks[1];
+
+            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 2, right, down);
+            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 2, right, down + 1);
+
+            destCr->addAverageBlocksAndHalfSet(srcBlocks, 2);
             delete srcBlocks[0];
             delete srcBlocks[1];
         } else {
-            Block* srcBlock = refPicture.getMacroblock(mbCol, mbRow, 0, rightY, downY);
+            Block* srcBlock = refPicture.getMacroblock(mbCol, mbRow, 0, right, down);
             destY->addAndHalfSet(*srcBlock);
             delete srcBlock;
-        }
-    }
-    // Cb, Cr
-    if (rightHalfC == 1) {
-        if (downHalfC == 1) {
-            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 1, rightC, downC);
-            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 1, rightC + 1, downC);
-            srcBlocks[2] = refPicture.getMacroblock(mbCol, mbRow, 1, rightC, downC + 1);
-            srcBlocks[3] = refPicture.getMacroblock(mbCol, mbRow, 1, rightC + 1, downC + 1);
 
-            destCb->addAverageAndHalfBlocksSet(srcBlocks, 4);
-            delete srcBlocks[0];
-            delete srcBlocks[1];
-            delete srcBlocks[2];
-            delete srcBlocks[3];
-
-            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 2, rightC, downC);
-            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 2, rightC + 1, downC);
-            srcBlocks[2] = refPicture.getMacroblock(mbCol, mbRow, 2, rightC, downC + 1);
-            srcBlocks[3] = refPicture.getMacroblock(mbCol, mbRow, 2, rightC + 1, downC + 1);
-
-            destCr->addAverageAndHalfBlocksSet(srcBlocks, 4);
-            delete srcBlocks[0];
-            delete srcBlocks[1];
-            delete srcBlocks[2];
-            delete srcBlocks[3];
-        } else {
-            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 1, rightC, downC);
-            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 1, rightC + 1, downC);
-
-            destCb->addAverageAndHalfBlocksSet(srcBlocks, 2);
-            delete srcBlocks[0];
-            delete srcBlocks[1];
-
-            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 2, rightC, downC);
-            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 2, rightC + 1, downC);
-
-            destCr->addAverageAndHalfBlocksSet(srcBlocks, 2);
-            delete srcBlocks[0];
-            delete srcBlocks[1];
-        }
-    } else {
-        if (downHalfC == 1) {
-            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 1, rightC, downC);
-            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 1, rightC, downC + 1);
-
-            destCb->addAverageAndHalfBlocksSet(srcBlocks, 2);
-            delete srcBlocks[0];
-            delete srcBlocks[1];
-
-            srcBlocks[0] = refPicture.getMacroblock(mbCol, mbRow, 2, rightC, downC);
-            srcBlocks[1] = refPicture.getMacroblock(mbCol, mbRow, 2, rightC, downC + 1);
-
-            destCr->addAverageAndHalfBlocksSet(srcBlocks, 2);
-            delete srcBlocks[0];
-            delete srcBlocks[1];
-        } else {
-            Block* srcBlock = refPicture.getMacroblock(mbCol, mbRow, 1, rightY, downY);
+            srcBlock = refPicture.getMacroblock(mbCol, mbRow, 1, right, down);
             destCb->addAndHalfSet(*srcBlock);
             delete srcBlock;
 
-            srcBlock = refPicture.getMacroblock(mbCol, mbRow, 2, rightY, downY);
+            srcBlock = refPicture.getMacroblock(mbCol, mbRow, 2, right, down);
             destCr->addAndHalfSet(*srcBlock);
             delete srcBlock;
         }

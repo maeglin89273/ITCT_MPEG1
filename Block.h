@@ -7,41 +7,45 @@
 
 #include "TypeDefinition.h"
 
+// A helper class for easy maniplulating block data, which is a one dimensional array
 class Block {
 private:
     byte* ptr;
-    int height;
-    int width;
+    unsigned int height;
+    unsigned int width;
     int trueHeight;
     int trueWidth;
-    int cIdx;
+    unsigned int cIdx;
     int sbWidth;
     int sX;
     int sY;
 public:
-    Block(byte *bufPtr, int height, int width, int cIdx, int superBlockWidth, int upScaleY=1, int upScaleX=1);
-    Block(byte *bufPtr, int height, int width, int cIdx);
+    // cIdx is color index, superBlockWidth is the width of the original picture in pixels
+    // upScaleX and upScaleY are for chrominance upsampling. They should be 2
+    Block(byte *bufPtr, unsigned int height, unsigned int width, unsigned int cIdx, int superBlockWidth, int upScaleY=1, int upScaleX=1);
+    Block(byte *bufPtr, unsigned int height, unsigned int width, unsigned int cIdx);
     ~Block();
-    void set(int x, int y, byte value);
-    void set(int i, byte value);
+    void set(unsigned int x, unsigned int y, byte value);
+    void set(unsigned int i, byte value);
     void set(int* data);
-    void averageBlocksSet(Block** blocks, int length);
     void set(Block &block);
-    void add(int x, int y, int value);
-    void add(int i, int value);
+
+
+    void averageBlocksSet(Block** blocks, unsigned int length);
+    void add(unsigned int x, unsigned int y, int value);
+    void add(unsigned int i, unsigned int value);
     void add(int* data);
-    byte get(int x, int y);
-    byte get(int i);
-    int getWidth();
-    int getHeight();
+    byte get(unsigned int x, unsigned int y);
+    byte get(unsigned int i);
+    unsigned int getWidth();
+    unsigned int getHeight();
 
     void setBufferPtr(byte *bufPtr);
+    void setCIndex(unsigned int cIdx);
 
-    void setCIndex(int cIdx);
+    void addAverageBlocksAndHalfSet(Block **blocks, unsigned int length);
 
-    void addAverageAndHalfBlocksSet(Block **blocks, int length);
-
-    void addAndHalfSet(int x, int y, int value);
+    void addAndHalfSet(unsigned int x, unsigned int y, int value);
 
     void addAndHalfSet(Block &block);
 };

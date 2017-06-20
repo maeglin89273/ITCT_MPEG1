@@ -13,9 +13,8 @@ Picture::Picture(unsigned int height, unsigned int width, byte type, uint16 tmpR
     this->type = type;
     this->tmpRef = tmpRef;
     this->data = new byte[width * height * 3];
-    this->colorMode = ColorMode::Y_Cb_Cr;
 }
-
+// implement the copying operation in case of the usage in the c++ list data structure
 Picture::Picture(const Picture &pic) {
     this->width = pic.width;
     this->height = pic.height;
@@ -24,9 +23,9 @@ Picture::Picture(const Picture &pic) {
     unsigned int size = this->width * this->height * 3;
     this->data = new byte[size];
     memcpy(this->data, pic.data, size);
-    this->colorMode = pic.colorMode;
 }
 
+// implement the copying operation in case of the usage in the c++ list data structure
 Picture &Picture::operator=(const Picture &pic) {
     this->width = pic.width;
     this->height = pic.height;
@@ -36,7 +35,6 @@ Picture &Picture::operator=(const Picture &pic) {
     delete [] this->data;
     this->data = new byte[size];
     memcpy(this->data, pic.data, size);
-    this->colorMode = pic.colorMode;
     return *this;
 }
 
@@ -56,21 +54,18 @@ unsigned int Picture::getWidth() {
     return this->width;
 }
 
-void Picture::toBGRAndCrop(unsigned int height, unsigned int width) {
-    if (this->colorMode == ColorMode::BGR) {
-        return;
-    }
-
+void Picture::toBGRAndCrop(byte* output, unsigned int cropHeight, unsigned int cropWidth) {
+    //create 3 input and output blocks for easy copying and converting color channels
     Block *inputY = new Block(this->data, this->height, this->width, 0);
     Block *inputCb = new Block(this->data, this->height, this->width, 1);
     Block *inputCr = new Block(this->data, this->height, this->width, 2);
 
-    byte* bgrData = new byte[width * height * 3];
-    Block *outputB = new Block(bgrData, height, width, 0);
-    Block *outputG = new Block(bgrData, height, width, 1);
-    Block *outputR = new Block(bgrData, height, width, 2);
-    for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
+
+    Block *outputB = new Block(output, cropHeight, cropWidth, 0);
+    Block *outputG = new Block(output, cropHeight, cropWidth, 1);
+    Block *outputR = new Block(output, cropHeight, cropWidth, 2);
+    for (unsigned int y = 0; y < cropHeight; y++) {
+        for (unsigned int x = 0; x < cropWidth; x++) {
             float yc = inputY->get(x, y);
             float cb = inputCb->get(x, y);
             float cr = inputCr->get(x, y);
@@ -86,12 +81,6 @@ void Picture::toBGRAndCrop(unsigned int height, unsigned int width) {
     delete outputB;
     delete outputG;
     delete outputR;
-
-    delete [] this->data;
-    this->data = bgrData;
-    this->width = width;
-    this->height = height;
-    this->colorMode = ColorMode::BGR;
 
 }
 
@@ -120,32 +109,32 @@ byte Picture::getType() {
     return this->type;
 }
 
+// it's useless, actually
 uint16 Picture::getTemporalReference() {
     return this->tmpRef;
 }
 
+// get the block at the given macroblock coordinate
 Block *Picture::getBlock(unsigned int mbCol, unsigned int mbRow, int blockI) {
 
     unsigned int pelIdx = this->computeMBPelIdx(mbCol, mbRow);
 
     //Y block
     if (blockI < 4) {
-        if (blockI % 2 == 0) {
+        if (blockI % 2 == 1) { // block 1, 3
             pelIdx += 8 * 3;
         }
 
-        if (blockI > 1) {
+        if (blockI > 1) { // block 2, 3
             pelIdx += (this->width * 3) * 8;
         }
         return new Block(&(this->data[pelIdx]), 8, 8, 0, this->width);
     }
     //Cb, Cr block
     return new Block(&(this->data[pelIdx]), 8, 8, blockI == 4? 1: 2, this->width, 2, 2);
-
-
 }
 
-Block *Picture::getMacroblock(unsigned int mbCol, unsigned int mbRow, int cIdx) {
+Block *Picture::getMacroblock(unsigned int mbCol, unsigned int mbRow, unsigned int cIdx) {
     unsigned int pelIdx = computeMBPelIdx(mbCol, mbRow);
     if (cIdx == 0) {
         return new Block(&(this->data[pelIdx]), 16, 16, cIdx, this->width);
@@ -154,7 +143,7 @@ Block *Picture::getMacroblock(unsigned int mbCol, unsigned int mbRow, int cIdx) 
     return new Block(&(this->data[pelIdx]), 8, 8, cIdx, this->width, 2, 2);
 }
 
-Block *Picture::getMacroblock(unsigned int mbCol, unsigned int mbRow, int cIdx, int pelOffsetX, int pelOffsetY) {
+Block *Picture::getMacroblock(unsigned int mbCol, unsigned int mbRow, unsigned int cIdx, int pelOffsetX, int pelOffsetY) {
     unsigned int pelIdx = computeMBPelIdx(mbCol, mbRow);
     pelIdx += pelOffsetX * 3;
     pelIdx += (this->width * 3) * pelOffsetY;
@@ -166,6 +155,7 @@ Block *Picture::getMacroblock(unsigned int mbCol, unsigned int mbRow, int cIdx, 
     return new Block(&(this->data[pelIdx]), 8, 8, cIdx, this->width, 2, 2);
 }
 
+//convert the macroblock coordinate to the corresponding byte array index
 unsigned int Picture::computeMBPelIdx(unsigned int mbCol, unsigned int mbRow) {
     return (this->width * 3) * (16 * mbRow) + 3 * (16 * mbCol); // y offset + x offset
 }

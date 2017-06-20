@@ -11,20 +11,20 @@
 #include "HuffmanTable.h"
 #include "FIDCT.h"
 #include "Block.h"
+#include "Renderer.h"
 
 class MpegDecoder {
 public:
-    MpegDecoder(BitBuffer* bitBuffer);
+    MpegDecoder(BitBuffer* bitBuffer, Renderer* renderer);
     ~MpegDecoder();
     Sequence * decode();
 
 private:
     BitBuffer* bitBuffer;
     Sequence* seq;
-    float fps;
+    Renderer* renderer;
     byte* intraQuantMat;
     byte* nonIntraQuantMat;
-    void hexPrint(bits data);
     int *dctZZ;
     FIDCT fidct;
 
@@ -84,8 +84,6 @@ private:
     int sign(int val);
 
     void reconIntraDctCoef(int blockI, int *dctRecon, int *dctZZ, int &dcPast);
-
-    void doIDCT(int *coeffs);
 
     void reconNonIntraDctCoef(int *dctRecon, int *dctZZ);
 
